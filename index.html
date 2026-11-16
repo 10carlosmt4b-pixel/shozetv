@@ -185,19 +185,19 @@ const INITIAL_D_EPS = [
 
 const SEED = [
   {type:'ytlist', id:'PLACWFlerZq-8V8x-Ist2boevsprDdOhFA', title:'Pokémon · Lista de YouTube 1'},
-  {type:'ytlist', id:'PLRefHcUvAIzOOOQFCWsJO5P8fxAToBemh', title:'Pokémon · Lista de YouTube 2'},
-  {type:'ytlist', id:'PLRcHmntfmJ8DB8wgMrUZwf3JGkLM17yeL', title:'Pokémon · Lista de YouTube 3'},
-  {type:'ytlist', id:'PLRcHmntfmJ8A7vV0RYnAu0farLTV_T1i2', title:'Pokémon · Lista de YouTube 4'},
-  {type:'ytlist', id:'PLRcHmntfmJ8BNWmL3MICuc1Oh5Mxf2qEh', title:'Pokémon · Lista de YouTube 5'},
-  {type:'ytlist', id:'PLRcHmntfmJ8AYULKvzhleQPgPRinNDpc0', title:'Pokémon · Lista de YouTube 6'},
-  {type:'ytlist', id:'PLRcHmntfmJ8BWeT4kzalbhx1r43bJv7pI', title:'Pokémon · Lista de YouTube 7'},
-  {type:'ytlist', id:'PLRcHmntfmJ8BdccTC3w86qIBdUjNDfPGV', title:'Pokémon · Lista de YouTube 8'},
-  {type:'ytlist', id:'PLRcHmntfmJ8DzeYoWwk7RsAbl2w-sg0zR', title:'Pokémon · Lista de YouTube 9'},
-  {type:'ytlist', id:'PLJCkfNkMHldU', video:'iPxSEVCvLLE', title:'Pokémon · Lista de YouTube 10'},
+  {type:'ytlist', id:'PLRcHmntfmJ8DB8wgMrUZwf3JGkLM17yeL', title:'Pokémon · Lista de YouTube 2'},
+  {type:'ytlist', id:'PLRcHmntfmJ8A7vV0RYnAu0farLTV_T1i2', title:'Pokémon · Lista de YouTube 3'},
+  {type:'ytlist', id:'PLRcHmntfmJ8BNWmL3MICuc1Oh5Mxf2qEh', title:'Pokémon · Lista de YouTube 4'},
+  {type:'ytlist', id:'PLRcHmntfmJ8AYULKvzhleQPgPRinNDpc0', title:'Pokémon · Lista de YouTube 5'},
+  {type:'ytlist', id:'PLRcHmntfmJ8BWeT4kzalbhx1r43bJv7pI', title:'Pokémon · Lista de YouTube 6'},
+  {type:'ytlist', id:'PLRcHmntfmJ8BdccTC3w86qIBdUjNDfPGV', title:'Pokémon · Lista de YouTube 7'},
+  {type:'ytlist', id:'PLRcHmntfmJ8DzeYoWwk7RsAbl2w-sg0zR', title:'Pokémon · Lista de YouTube 8'},
+  {type:'ytlist', id:'PLJCkfNkMHldU', video:'iPxSEVCvLLE', title:'Pokémon · Lista de YouTube 9'},
   {type:'embedlist', id:'initial_d_first_stage', title:'Initial D · First Stage (26 Caps)', episodes: INITIAL_D_EPS},
   {type:'ytlist', id:'PLFWMo_gjXR-P0YdtDG4NlIgEaC9tJaEwl', video:'Rd0jtrc3Ml8', title:'Campeones (Oliver y Benji) · Lista de YouTube'}
 ];
 
+const REMOVED_SEED = ['PLRefHcUvAIzOOOQFCWsJO5P8fxAToBemh']; // Temporada 2: repetía la 1
 function load(){
   try{
     const raw = localStorage.getItem('animetv3');
@@ -205,6 +205,10 @@ function load(){
       const d = JSON.parse(raw);
       if(Array.isArray(d)) items = d;
     }
+    // Quitar de la programación las listas eliminadas (también en navegadores que ya la guardaron)
+    const antes = items.length;
+    items = items.filter(i => !REMOVED_SEED.includes(i.id));
+    if(items.length !== antes && idx >= items.length) idx = 0;
     let seeded = JSON.parse(localStorage.getItem('animetv3_seeded') || 'null');
     if(!Array.isArray(seeded)) seeded = [];
     SEED.forEach(s => {
