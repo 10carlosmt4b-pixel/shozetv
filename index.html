@@ -88,6 +88,7 @@ a{color:#b4400a}
     <div id="ytbox"><div id="ytplayer"></div></div>
     <iframe id="embedbox" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe>
     <canvas id="noise"></canvas>
+    <audio id="aud" style="display:none"></audio>
     <div class="empty" id="empty">Tu canal está vacío.<br>Pega un enlace de YouTube o añade archivos para empezar 📺</div>
     <div class="guard" id="guard"></div>
     <div class="osd" id="osd"></div>
@@ -134,7 +135,7 @@ a{color:#b4400a}
     </p>
     <p class="note">
       Los archivos propios solo duran mientras la página está abierta; los enlaces se guardan en tu navegador. <b>Otros reproductores</b> (Rumble, Dailymotion, Vimeo…): pega el enlace de inserción (<code>…/embed/…</code>) o el código <code>&lt;iframe&gt;</code> de cada vídeo, y pon su duración para que pase solo al siguiente. En esos vídeos no funcionan el volumen, el play ni el audio/subtítulos de esta página.
-      <b>Importante:</b> YouTube no se reproduce al abrir el archivo con doble clic (file://). Aloja la página en un servidor (GitHub Pages, Netlify…) o ejecuta <code>python -m http.server</code> en su carpeta y abre <code>http://localhost:8000</code>.
+      <b>Idioma:</b> los v\u00eddeos de YouTube pasan por un puente (Piped) que elige autom\u00e1ticamente la pista en espa\u00f1ol cuando existe; si el puente no responde, se usa el reproductor normal de YouTube y el bot\u00f3n \u{1F5E3}\ufe0f ES permite elegirla a mano. <b>Importante:</b> YouTube no se reproduce al abrir el archivo con doble clic (file://). Aloja la página en un servidor (GitHub Pages, Netlify…) o ejecuta <code>python -m http.server</code> en su carpeta y abre <code>http://localhost:8000</code>.
     </p>
   </div>
 </div>
@@ -143,9 +144,11 @@ a{color:#b4400a}
 <script>
 const $ = id => document.getElementById(id);
 const vid = $('vid'), noise = $('noise'), osd = $('osd');
+const audioEl = $('aud');
 let items = [], idx = 0, shuffle = true, tune = 0, osdT, yt = null, ytReady = false, ytQueue = [], ytLoading = false, volume = 1, muted = false;
 let ytControls = 0; // 1 = mostrar controles nativos de YouTube (para elegir pista de audio)
 const baseVars = () => ({autoplay:1, controls:ytControls, disablekb:1, fs:1, rel:0, iv_load_policy:3, playsinline:1, hl:'es', cc_load_policy:0});
+let mode = 'none', piped = {ids: [], i: 0}, pipedAuto = false, pipedKickT;
 const esc = s => String(s).replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
 
 // ---------- Persistencia (solo enlaces) ----------
@@ -236,6 +239,10 @@ function showOsd(extra){
     const epIdx = it._epIdx || 0;
     const ep = it.episodes[epIdx];
     if(ep) subTitle += ' — ' + ep.title + ' (' + (epIdx+1) + '/' + it.episodes.length + ')';
+  }
+  if((it.type === 'yt' || it.type === 'ytlist') && mode === 'piped' && piped.ids.length > 1){
+    const ti = piped.titles && piped.titles[piped.i];
+    subTitle += ' — ' + (ti || ('Vídeo ' + (piped.i + 1))) + ' (' + (piped.i + 1) + '/' + piped.ids.length + ')';
   }
   osd.innerHTML = 'SHOZE TV · ' + String(idx+1).padStart(2,'0') + '/' + String(items.length).padStart(2,'0') + '<small>' + esc(subTitle) + '</small>' + (extra ? '<small>'+extra+'</small>' : '');
   osd.classList.add('on'); clearTimeout(osdT);
@@ -410,11 +417,125 @@ function onYtError(code){
 }
 function showErr(msg){ showOsd(esc(msg)); }
 
+// ---------- Puente Piped: audio en español automático ----------
+// Los iframes de YouTube SIEMPRE usan la pista original del vídeo y su API no
+// permite cambiarla. Piped (frontend de YouTube) sí expone las pistas por API:
+// montamos el vídeo sin sonido + el audio en español, sincronizados. Si el
+// puente falla, se vuelve automáticamente al reproductor normal de YouTube.
+const PIPED_INSTANCES = [
+  'https://pipedapi.kavin.rocks',
+  'https://pipedapi.adminforge.de',
+  'https://pipedapi.reallyaweso.me',
+  'https://pipedapi.leptons.xyz',
+  'https://pipedapi.private.coffee',
+  'https://pipedapi.drgns.space'
+];
+async function pipedFetch(path){
+  for(const base of PIPED_INSTANCES){
+    try{
+      const c = new AbortController();
+      const t = setTimeout(() => c.abort(), 8000);
+      const r = await fetch(base + path, {signal: c.signal});
+      clearTimeout(t);
+      if(r.ok) return await r.json();
+    }catch(e){}
+  }
+  throw new Error('piped no disponible');
+}
+function pipedPick(data){
+  const tracks = data.audioTracks || [];
+  let track = null;
+  for(const tr of tracks){
+    const n = String(tr.name || '').toLowerCase();
+    if(/latin|latino|mexic|419/.test(n)) continue;   // español de España, no latino
+    if(/espa(ñ|n)|spanish|castell|spain/.test(n)){ track = tr; break; }
+  }
+  if(!track && tracks.length) track = tracks[0];    // mejor algo que nada
+  const vs = (data.videoStreams || []).filter(s => s.videoOnly);
+  vs.sort((a,b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0));
+  const v = vs.find(s => /^(720p|480p)/.test(s.quality)) || vs[0];
+  const a = track && (track.audioStreams || [])[0];
+  return {v: v, a: a, aName: track ? track.name : ''};
+}
+async function pipedPlay(id){
+  const data = await pipedFetch('/streams/' + id);
+  const p = pipedPick(data);
+  if(!p.v || !p.a) throw new Error('sin flujos');
+  mode = 'piped';
+  vid.muted = true;                      // el sonido va por el elemento <audio>
+  vid.src = p.v.url;
+  audioEl.src = p.a.url;
+  audioEl.volume = volume; audioEl.muted = muted;
+  await Promise.all([vid.play().catch(() => {}), audioEl.play().catch(() => {})]);
+  if(p.aName) showOsd('Audio: ' + esc(p.aName));
+}
+async function playYT(it, withStatic){
+  mode = 'piped';
+  try{
+    if(it.type === 'yt'){ piped.ids = [it.id]; piped.titles = []; piped.i = 0; }
+    else{
+      if(!it.ids || !it.ids.length){
+        const d = await pipedFetch('/playlists/' + it.id);
+        it.ids = d.videos.map(x => x.id).filter(Boolean);
+        it.titles = d.videos.map(x => x.title || '');
+        save(); render();
+      }
+      piped.ids = it.ids; piped.titles = it.titles || [];
+      piped.i = fresh ? Math.floor(Math.random() * piped.ids.length) : 0; fresh = false;
+    }
+    await pipedLoadCurrent(withStatic);
+  }catch(e){
+    mode = 'yt';   // el puente no responde: reproductor normal de YouTube
+    playSpecificYT(it);
+  }
+}
+async function pipedLoadCurrent(withStatic){
+  const it = items[idx];
+  if(withStatic) staticBurst();
+  showOsd('Sintonizando…');
+  try{
+    await pipedPlay(piped.ids[piped.i]);
+    showOsd();
+    pipedKick();
+    render();
+  }catch(e){
+    mode = 'yt';
+    playSpecificYT(it);
+  }
+}
+function pipedAdvance(){
+  const it = items[idx];
+  if(it && it.type === 'ytlist' && piped.i + 1 < piped.ids.length){
+    piped.i++;
+    pipedLoadCurrent(true);
+  } else nextEp();
+}
+function pipedKick(){
+  clearTimeout(pipedKickT);
+  pipedKickT = setTimeout(() => {
+    if(mode !== 'piped') return;
+    if(vid.paused){
+      muted = true; pipedAuto = true; $('mute').textContent = '\u{1F507}';
+      audioEl.muted = true;
+      vid.play().catch(() => {}); audioEl.play().catch(() => {});
+      showOsd('Pulsa la pantalla para activar el sonido');
+    }
+  }, 3000);
+}
+vid.addEventListener('timeupdate', () => {
+  if(mode === 'piped' && audioEl.src && Math.abs(audioEl.currentTime - vid.currentTime) > 0.35) audioEl.currentTime = vid.currentTime;
+});
+vid.addEventListener('play',  () => { if(mode === 'piped') audioEl.play().catch(() => {}); });
+vid.addEventListener('pause', () => { if(mode === 'piped') audioEl.pause(); });
+vid.addEventListener('waiting', () => { if(mode === 'piped') audioEl.pause(); });
+
 // ---------- Reproducción ----------
-function hideEmbed(){ clearTimeout(embedT); const f = $('embedbox'); f.src = 'about:blank'; f.style.display = 'none'; $('guard').style.display = ytControls ? 'none' : 'block'; }
+function hideEmbed(){ clearTimeout(embedT); const f = $('embedbox'); f.src = 'about:blank'; f.style.display = 'none'; $('guard').style.display = (ytControls && mode === 'yt') ? 'none' : 'block'; }
 function stopAll(){ hideEmbed();
   vid.pause(); vid.removeAttribute('src'); vid.load();
+  audioEl.pause(); audioEl.removeAttribute('src'); audioEl.load();
   try{ if(ytReady) yt.stopVideo(); }catch(e){}
+  mode = 'none';
 }
 function playCurrent(withStatic){
   const it = items[idx];
@@ -423,9 +544,11 @@ function playCurrent(withStatic){
   if(withStatic) staticBurst();
   if(it.type === 'yt' || it.type === 'ytlist'){
     hideEmbed();
-    vid.pause(); vid.style.display = 'none'; $('ytbox').style.display = 'block';
-    playSpecificYT(it);
+    vid.pause(); vid.style.display = 'none'; $('ytbox').style.display = 'none';
+    try{ if(ytReady) yt.stopVideo(); }catch(e){}
+    playYT(it, withStatic);
   } else if(it.type === 'embedlist'){
+    mode = 'embed';
     vid.pause(); vid.style.display = 'none'; $('ytbox').style.display = 'none';
     try{ if(ytReady) yt.stopVideo(); }catch(e){}
     clearTimeout(embedT);
@@ -443,12 +566,14 @@ function playCurrent(withStatic){
     $('guard').style.display = 'none';
     embedT = setTimeout(() => advanceEmbedList(it), (ep.mins || 24)*60000);
   } else if(it.type === 'embed'){
+    mode = 'embed';
     vid.pause(); vid.style.display = 'none'; $('ytbox').style.display = 'none';
     try{ if(ytReady) yt.stopVideo(); }catch(e){}
     clearTimeout(embedT);
     $('embedbox').src = it.src; $('embedbox').style.display = 'block'; $('guard').style.display = 'none';
     embedT = setTimeout(nextEp, (it.mins || 24)*60000);
   } else {
+    mode = 'file';
     hideEmbed();
     try{ if(ytReady) yt.stopVideo(); }catch(e){}
     $('ytbox').style.display = 'none'; vid.style.display = 'block';
@@ -488,8 +613,12 @@ function prevEp(){
   if(items[idx] && items[idx].type === 'embedlist') items[idx]._epIdx = 0;
   playCurrent(true);
 }
-vid.addEventListener('ended', nextEp);
-vid.addEventListener('error', () => { if(vid.getAttribute('src')) showErr('No se pudo reproducir este archivo'); });
+vid.addEventListener('ended', () => { if(mode === 'piped') pipedAdvance(); else nextEp(); });
+vid.addEventListener('error', () => {
+  if(mode === 'piped'){ mode = 'yt'; playSpecificYT(items[idx]); return; }
+  if(vid.getAttribute('src')) showErr('No se pudo reproducir este archivo');
+});
+audioEl.addEventListener('error', () => { if(mode === 'piped'){ mode = 'yt'; playSpecificYT(items[idx]); } });
 
 // ---------- Interfaz ----------
 const tag = t => t==='file' ? 'archivo' : t==='url' ? 'mp4' : t==='yt' ? 'YouTube' : t==='embed' ? 'incrustado' : t==='embedlist' ? 'serie (26)' : 'lista YT';
@@ -568,6 +697,10 @@ $('clear').onclick = () => {
 // ---------- Mando ----------
 $('next').onclick = () => {
   const it = items[idx];
+  if(mode === 'piped'){
+    if(piped.i + 1 < piped.ids.length){ piped.i++; pipedLoadCurrent(true); return; }
+    nextEp(); return;
+  }
   if(isYT(it) && ytReady){
     try{
       const pl = yt.getPlaylist() || [];
@@ -586,6 +719,10 @@ $('next').onclick = () => {
 };
 $('prev').onclick = () => {
   const it = items[idx];
+  if(mode === 'piped'){
+    if(piped.i > 0){ piped.i--; pipedLoadCurrent(true); return; }
+    prevEp(); return;
+  }
   if(isYT(it) && ytReady){
     try{
       if(yt.getPlaylistIndex() > 0){
@@ -602,18 +739,35 @@ $('prev').onclick = () => {
 };
 $('play').onclick = () => {
   const it = items[idx]; if(!it) return;
+  if(mode === 'piped'){
+    if(pipedAuto){ pipedAuto = false; if(muted) $('mute').click(); }
+    vid.paused ? (vid.play().catch(() => {}), audioEl.play().catch(() => {})) : (vid.pause(), audioEl.pause());
+    return;
+  }
   if(it.type==='yt' || it.type==='ytlist'){ try{ if(autoMuted) $('mute').click(); yt.getPlayerState()===1 ? yt.pauseVideo() : yt.playVideo(); }catch(e){} }
   else vid.paused ? vid.play() : vid.pause();
 };
 $('shuffle').onclick = () => { shuffle = !shuffle; render(); };
 $('mute').onclick = () => {
-  muted = !muted; autoMuted = false; vid.muted = muted;
+  muted = !muted; autoMuted = false; pipedAuto = false;
+  vid.muted = muted || mode === 'piped';
+  audioEl.muted = muted;
   try{ if(ytReady) muted ? yt.mute() : yt.unMute(); }catch(e){}
   $('mute').textContent = muted ? '🔇' : '🔊';
 };
 $('lang').onclick = () => {
   const it = items[idx];
   if(!isYT(it)){ showOsd('El idioma solo aplica a v\u00eddeos de YouTube'); return; }
+  if(mode === 'piped'){
+    // Emergencia: reproductor oficial de YouTube con controles nativos (⚙ → Pista de audio)
+    ytControls = 1; mode = 'yt';
+    hideEmbed();
+    vid.pause(); vid.style.display = 'none'; $('ytbox').style.display = 'block';
+    try{ if(ytReady) yt.stopVideo(); }catch(e){}
+    playSpecificYT(it);
+    showOsd('Modo manual: pulsa \u2699 en el v\u00eddeo \u2192 \u00abPista de audio\u00bb \u2192 Espa\u00f1ol');
+    return;
+  }
   // 1) Red de seguridad: si la API del iframe expusiera selecci\u00f3n de pistas, usarla
   setSpanishAudio();
   let hasTracks = false;
@@ -657,7 +811,7 @@ $('lang').onclick = () => {
     ? 'Controles de YouTube activados: pulsa \u2699 en el v\u00eddeo \u2192 «Pista de audio» \u2192 Espa\u00f1ol. Pulsa 🗣️ ES otra vez para ocultarlos'
     : 'Controles de YouTube ocultos');
 };
-$('vol').oninput = e => { volume = +e.target.value; vid.volume = volume; try{ if(ytReady) yt.setVolume(volume*100); }catch(err){} };
+$('vol').oninput = e => { volume = +e.target.value; if(mode !== 'piped') vid.volume = volume; audioEl.volume = volume; try{ if(ytReady) yt.setVolume(volume*100); }catch(err){} };
 let pseudo = false;
 const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement;
 function setPseudoFull(on){ pseudo = on; $('screen').classList.toggle('pfull', on); document.body.classList.toggle('nolock', on); }
@@ -697,6 +851,11 @@ $('powerBtn').onclick = () => {
 };
 $('gear').onclick = () => $('manage').classList.toggle('open');
 $('guard').onclick = () => {
+  if(mode === 'piped'){
+    if(pipedAuto){ pipedAuto = false; if(muted) $('mute').click(); }
+    vid.play().catch(() => {}); audioEl.play().catch(() => {});
+    return;
+  }
   if(!isYT(items[idx]) || !ytReady) return;
   if(autoMuted) $('mute').click();
   try{ const st = yt.getPlayerState(); if(st !== 1 && st !== 3) yt.playVideo(); }catch(e){}
