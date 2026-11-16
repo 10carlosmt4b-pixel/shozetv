@@ -185,6 +185,7 @@ const INITIAL_D_EPS = [
 
 const SEED = [
   {type:'ytlist', id:'PLACWFlerZq-8V8x-Ist2boevsprDdOhFA', title:'Pokémon · Lista de YouTube 1'},
+  {type:'ytlist', id:'PLRcHmntfmJ8DB8wgMrUZwf3JGkLM17yeL', title:'Pokémon · Lista de YouTube 2'},
   {type:'ytlist', id:'PLRcHmntfmJ8A7vV0RYnAu0farLTV_T1i2', title:'Pokémon · Lista de YouTube 3'},
   {type:'ytlist', id:'PLRcHmntfmJ8BNWmL3MICuc1Oh5Mxf2qEh', title:'Pokémon · Lista de YouTube 4'},
   {type:'ytlist', id:'PLRcHmntfmJ8AYULKvzhleQPgPRinNDpc0', title:'Pokémon · Lista de YouTube 5'},
@@ -196,10 +197,7 @@ const SEED = [
   {type:'ytlist', id:'PLFWMo_gjXR-P0YdtDG4NlIgEaC9tJaEwl', video:'Rd0jtrc3Ml8', title:'Campeones (Oliver y Benji) · Lista de YouTube'}
 ];
 
-const REMOVED_SEED = [
-  'PLRefHcUvAIzOOOQFCWsJO5P8fxAToBemh', // Temporada 2: repetía la 1
-  'PLRcHmntfmJ8DB8wgMrUZwf3JGkLM17yeL'  // Pokémon · Lista de YouTube 2 (eliminada)
-];
+const REMOVED_SEED = ['PLRefHcUvAIzOOOQFCWsJO5P8fxAToBemh']; // Temporada 2: repetía la 1
 function load(){
   try{
     const raw = localStorage.getItem('animetv3');
@@ -670,7 +668,7 @@ function parseEmbed(u){
   const h = url.hostname.replace(/^www\./,''); let d;
   if(h === 'dailymotion.com' && (d = url.pathname.match(/^\/video\/(\w+)/))) return 'https://www.dailymotion.com/embed/video/' + d[1];
   if(h === 'vimeo.com' && (d = url.pathname.match(/^\/(\d+)/))) return 'https://player.vimeo.com/video/' + d[1];
-  if(/\/embed/.test(url.pathname) || h.startsWith('player.')) return url.href;
+  if(/\/embed/.test(url.pathname) || h.startsWith('player.')) return url.href;
   return null;
 }
 function addItem(it){
@@ -696,4 +694,184 @@ $('files').onchange = e => {
   e.target.value = '';
 };
 $('clear').onclick = () => {
-  if(!items.length ||
+  if(!items.length || !confirm('¿Vaciar todo el canal?')) return;
+  items = []; idx = 0; save(); stopAll(); playCurrent(false);
+};
+
+// ---------- Mando ----------
+$('next').onclick = () => {
+  const it = items[idx];
+  if(mode === 'piped'){
+    if(piped.i + 1 < piped.ids.length){ piped.i++; pipedLoadCurrent(true); return; }
+    nextEp(); return;
+  }
+  if(isYT(it) && ytReady){
+    try{
+      const pl = yt.getPlaylist() || [];
+      if(pl.length > 0 && yt.getPlaylistIndex() < pl.length-1){
+        yt.nextVideo();
+        yt.playVideo();
+        armKick();
+        return;
+      }
+    }catch(e){}
+  } else if(it && it.type === 'embedlist'){
+    advanceEmbedList(it);
+    return;
+  }
+  nextEp();
+};
+$('prev').onclick = () => {
+  const it = items[idx];
+  if(mode === 'piped'){
+    if(piped.i > 0){ piped.i--; pipedLoadCurrent(true); return; }
+    prevEp(); return;
+  }
+  if(isYT(it) && ytReady){
+    try{
+      if(yt.getPlaylistIndex() > 0){
+        yt.previousVideo();
+        return;
+      }
+    }catch(e){}
+  } else if(it && it.type === 'embedlist' && (it._epIdx || 0) > 0){
+    it._epIdx--;
+    playCurrent(true);
+    return;
+  }
+  prevEp();
+};
+$('play').onclick = () => {
+  const it = items[idx]; if(!it) return;
+  if(mode === 'piped'){
+    if(pipedAuto){ pipedAuto = false; if(muted) $('mute').click(); }
+    vid.paused ? (vid.play().catch(() => {}), audioEl.play().catch(() => {})) : (vid.pause(), audioEl.pause());
+    return;
+  }
+  if(it.type==='yt' || it.type==='ytlist'){ try{ if(autoMuted) $('mute').click(); yt.getPlayerState()===1 ? yt.pauseVideo() : yt.playVideo(); }catch(e){} }
+  else vid.paused ? vid.play() : vid.pause();
+};
+$('shuffle').onclick = () => { shuffle = !shuffle; render(); };
+$('mute').onclick = () => {
+  muted = !muted; autoMuted = false; pipedAuto = false;
+  vid.muted = muted || mode === 'piped';
+  audioEl.muted = muted;
+  try{ if(ytReady) muted ? yt.mute() : yt.unMute(); }catch(e){}
+  $('mute').textContent = muted ? '🔇' : '🔊';
+};
+$('lang').onclick = () => {
+  const it = items[idx];
+  if(!isYT(it)){ showOsd('El idioma solo aplica a v\u00eddeos de YouTube'); return; }
+  if(mode === 'piped'){
+    // Emergencia: reproductor oficial de YouTube con controles nativos (⚙ → Pista de audio)
+    ytControls = 1; mode = 'yt';
+    hideEmbed();
+    vid.pause(); vid.style.display = 'none'; $('ytbox').style.display = 'block';
+    try{ if(ytReady) yt.stopVideo(); }catch(e){}
+    playSpecificYT(it);
+    showOsd('Modo manual: pulsa \u2699 en el v\u00eddeo \u2192 \u00abPista de audio\u00bb \u2192 Espa\u00f1ol');
+    return;
+  }
+  // 1) Red de seguridad: si la API del iframe expusiera selecci\u00f3n de pistas, usarla
+  setSpanishAudio();
+  let hasTracks = false;
+  try{
+    if(typeof yt.getAvailableAudioTracks === 'function'){
+      hasTracks = (yt.getAvailableAudioTracks() || []).length > 0;
+    }
+  }catch(e){}
+  if(hasTracks){ showOsd('Idioma: Espa\u00f1ol (ES)'); return; }
+  if(!ytReady){ showOsd('Reproductor de YouTube a\u00fan no listo, espera unos segundos'); return; }
+  // 2) La API no permite cambiar la pista de audio: mostrar los controles
+  //    nativos de YouTube (su bot\u00f3n \u2699) para elegirla a mano, retomando
+  //    el v\u00eddeo justo donde se qued\u00f3. Otro clic vuelve a ocultarlos.
+  ytControls = ytControls ? 0 : 1;
+  let t = 0, pl = [], pi = 0;
+  try{ t = yt.getCurrentTime() || 0; pl = yt.getPlaylist() || []; pi = yt.getPlaylistIndex(); }catch(e){}
+  try{ yt.destroy(); }catch(e){}
+  ytReady = false; ytLoading = true;
+  yt = new YT.Player('ytplayer', {width:'100%',height:'100%',playerVars:baseVars(),events:{
+    onReady: () => {
+      ytReady = true;
+      try{ yt.getIframe().setAttribute('allowfullscreen',''); }catch(err){}
+      yt.setVolume(volume*100); if(muted) yt.mute();
+      try{
+        if(it.type === 'ytlist'){
+          if(pl.length) yt.loadPlaylist({playlist: pl, index: Math.max(0, pi), startSeconds: t});
+          else yt.loadPlaylist({list: it.id, listType: 'playlist', startSeconds: t});
+        } else {
+          yt.loadVideoById(it.id, t);
+        }
+      }catch(err){}
+      armKick();
+      ytQueue.splice(0).forEach(f => f());
+    },
+    onStateChange: onYtState,
+    onError: e => onYtError(e.data)
+  }});
+  // Con controles nativos, el guard del mando no debe taparlos
+  $('guard').style.display = ytControls ? 'none' : 'block';
+  showOsd(ytControls
+    ? 'Controles de YouTube activados: pulsa \u2699 en el v\u00eddeo \u2192 «Pista de audio» \u2192 Espa\u00f1ol. Pulsa 🗣️ ES otra vez para ocultarlos'
+    : 'Controles de YouTube ocultos');
+};
+$('vol').oninput = e => { volume = +e.target.value; if(mode !== 'piped') vid.volume = volume; audioEl.volume = volume; try{ if(ytReady) yt.setVolume(volume*100); }catch(err){} };
+let pseudo = false;
+const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement;
+function setPseudoFull(on){ pseudo = on; $('screen').classList.toggle('pfull', on); document.body.classList.toggle('nolock', on); }
+function toggleFull(){
+  const sc = $('screen');
+  if(pseudo){ setPseudoFull(false); return; }
+  if(fsEl()){ (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
+  const req = sc.requestFullscreen || sc.webkitRequestFullscreen;
+  if(!req){ setPseudoFull(true); return; }
+  try{ const r = req.call(sc); if(r && r.catch) r.catch(() => setPseudoFull(true)); }
+  catch(err){ setPseudoFull(true); }
+}
+$('exitfs').onclick = () => setPseudoFull(false);
+$('full').onclick = toggleFull;
+vid.ondblclick = toggleFull;
+vid.onclick = () => $('play').click();
+
+document.addEventListener('keydown', e => {
+  if(e.target.tagName === 'INPUT') return;
+  const k = e.key;
+  if(k === 'Escape' && pseudo) setPseudoFull(false);
+  if(k==='ArrowRight' || k==='ArrowUp') $('next').click();
+  else if(k==='ArrowLeft' || k==='ArrowDown') $('prev').click();
+  else if(k===' '){ e.preventDefault(); $('play').click(); }
+  else if(k==='f'||k==='F') toggleFull();
+  else if(k==='m'||k==='M') $('mute').click();
+  else if(k==='l'||k==='L') $('lang').click();
+  else if(k==='i'||k==='I') showOsd();
+});
+
+load(); render();
+$('empty').style.display = 'none';
+$('powerBtn').onclick = () => {
+  $('power').style.display = 'none';
+  if(!items.length){ $('manage').classList.add('open'); $('empty').style.display = 'grid'; return; }
+  idx = Math.floor(Math.random()*items.length); fresh = true; playCurrent(true);
+};
+$('gear').onclick = () => $('manage').classList.toggle('open');
+$('guard').onclick = () => {
+  if(mode === 'piped'){
+    if(pipedAuto){ pipedAuto = false; if(muted) $('mute').click(); }
+    vid.play().catch(() => {}); audioEl.play().catch(() => {});
+    return;
+  }
+  if(!isYT(items[idx]) || !ytReady) return;
+  if(autoMuted) $('mute').click();
+  try{ const st = yt.getPlayerState(); if(st !== 1 && st !== 3) yt.playVideo(); }catch(e){}
+};
+if(items.some(isYT)){ ensureYT(() => {}); prefetch(); }
+$('guard').ondblclick = toggleFull;
+$('off').onclick = () => {
+  stopAll(); tune = 0; fresh = false;
+  $('ytbox').style.display = 'none'; vid.style.display = 'none';
+  osd.classList.remove('on');
+  $('power').style.display = 'grid';
+};
+</script>
+</body>
+</html>
