@@ -10,27 +10,22 @@
 <h1>SHOZE TV</h1>
 <div class="tv"><div class="screen" id="screen"><video id="vid" playsinline controls></video><div id="ytbox"><div id="ytplayer"></div></div><iframe id="embedbox" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen title="Vídeo incrustado"></iframe><div class="empty" id="empty">Tu canal está vacío.<br>Añade vídeos o listas para empezar 📺</div><div class="osd" id="osd"></div><div class="power" id="power"><button id="powerBtn">⏻ Encender TV</button></div></div>
 <div class="bar"><button id="play">⏯ Play</button><button id="prev">⏮ Anterior</button><button id="next">⏭ Siguiente</button><button id="off">⏻ Apagar</button><span class="sp"></span><button id="gear">⚙ Canal</button><button id="mute">🔊</button><input id="vol" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volumen"><button id="full">⛶ Pantalla completa</button><button id="lang">🗣️ ES</button></div></div>
-<div class="cols" id="manage"><section class="card"><h2>Programación</h2><ol id="list"></ol></section><section class="card"><h2>Añadir al canal</h2><input id="title" type="text" placeholder="Título (opcional)"><input id="mins" type="text" placeholder="Duración en minutos para vídeos incrustados (por defecto 24)"><div class="row"><input id="url" type="text" placeholder="Enlace de YouTube, vídeo MP4 o reproductor"><button id="addUrl">Añadir</button></div><div class="row"><label class="btn filelabel">📁 Añadir archivos propios <input id="files" type="file" accept="video/*" multiple hidden></label><button id="clear">🗑 Vaciar canal</button></div><p class="note">Las listas de Pokémon aparecen seguidas en la programación con el mismo nombre. Initial D y Campeones se han quitado. Al encender, se elige un canal y un punto del episodio al azar; después continúa en orden.</p></section></div>
+<div class="cols" id="manage"><section class="card"><h2>Programación</h2><ol id="list"></ol></section><section class="card"><h2>Añadir al canal</h2><input id="title" type="text" placeholder="Título (opcional)"><input id="mins" type="text" placeholder="Duración en minutos para vídeos incrustados (por defecto 24)"><div class="row"><input id="url" type="text" placeholder="Enlace de YouTube, vídeo MP4 o reproductor"><button id="addUrl">Añadir</button></div><div class="row"><label class="btn filelabel">📁 Añadir archivos propios <input id="files" type="file" accept="video/*" multiple hidden></label><button id="clear">🗑 Vaciar canal</button></div><p class="note">Se han quitado las listas anteriores de Pokémon, Initial D y Campeones. Las cuatro listas nuevas de Pokémon aparecen seguidas en el orden que enviaste.</p></section></div>
 <script>
 'use strict';
 const $=id=>document.getElementById(id);
 const POKEMON=[
- {type:'ytlist',id:'PLACWFlerZq-8V8x-Ist2boevsprDdOhFA',title:'Pokémon'},
- {type:'ytlist',id:'PLRcHmntfmJ8DB8wgMrUZwf3JGkLM17yeL',title:'Pokémon'},
- {type:'ytlist',id:'PLRcHmntfmJ8A7vV0RYnAu0farLTV_T1i2',title:'Pokémon'},
- {type:'ytlist',id:'PLRcHmntfmJ8BNWmL3MICuc1Oh5Mxf2qEh',title:'Pokémon'},
- {type:'ytlist',id:'PLRcHmntfmJ8AYULKvzhleQPgPRinNDpc0',title:'Pokémon'},
- {type:'ytlist',id:'PLRcHmntfmJ8BWeT4kzalbhx1r43bJv7pI',title:'Pokémon'},
- {type:'ytlist',id:'PLRcHmntfmJ8BdccTC3w86qIBdUjNDfPGV',title:'Pokémon'},
- {type:'ytlist',id:'PLRcHmntfmJ8DzeYoWwk7RsAbl2w-sg0zR',title:'Pokémon'},
- {type:'ytlist',id:'PLJCkfNkMHldU',video:'iPxSEVCvLLE',title:'Pokémon'}
+ {type:'ytlist',id:'PLRcHmntfmJ8B5eUO9b-J_fSWF5tPjnSWB',title:'Pokémon'},
+ {type:'ytlist',id:'PLRcHmntfmJ8DU1LS6ExXHGTdzvpHDdVqn',title:'Pokémon'},
+ {type:'ytlist',id:'PLRcHmntfmJ8AOHGOH7140F3UAntAqK6P9',title:'Pokémon'},
+ {type:'ytlist',id:'PLarmIGx21XFw',title:'Pokémon',video:'iPxSEVCvLLE'}
 ];
-const REMOVED_IDS=new Set(['initial_d_first_stage','PLFWMo_gjXR-P0YdtDG4NlIgEaC9tJaEwl']);
+const OLD_SEED_IDS=new Set(['PLACWFlerZq-8V8x-Ist2boevsprDdOhFA','PLRcHmntfmJ8DB8wgMrUZwf3JGkLM17yeL','PLRcHmntfmJ8A7vV0RYnAu0farLTV_T1i2','PLRcHmntfmJ8BNWmL3MICuc1Oh5Mxf2qEh','PLRcHmntfmJ8AYULKvzhleQPgPRinNDpc0','PLRcHmntfmJ8BWeT4kzalbhx1r43bJv7pI','PLRcHmntfmJ8BdccTC3w86qIBdUjNDfPGV','PLRcHmntfmJ8DzeYoWwk7RsAbl2w-sg0zR','PLJCkfNkMHldU','initial_d_first_stage','PLFWMo_gjXR-P0YdtDG4NlIgEaC9tJaEwl']);
 let items=[],idx=0,mode='none',yt=null,ytReady=false,ytLoading=false,ytQueue=[],muted=false,volume=1,osdTimer=null,embedTimer=null,randomStart=false,randomYTList=false;
 const vid=$('vid'),ytbox=$('ytbox'),embedbox=$('embedbox');
 const esc=s=>String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function save(){try{localStorage.setItem('animetv3',JSON.stringify(items.filter(x=>x.type!=='file')))}catch(e){}}
-function load(){try{const saved=JSON.parse(localStorage.getItem('animetv3')||'[]');if(Array.isArray(saved))items=saved.filter(x=>x&&x.type&&!REMOVED_IDS.has(x.id)&&x.type!=='embedlist'&&x.id!=='PLFWMo_gjXR-P0YdtDG4NlIgEaC9tJaEwl')}catch(e){items=[]}for(const p of POKEMON){let existing=items.find(x=>x.type==='ytlist'&&x.id===p.id);if(existing){existing.title='Pokémon';existing.video=p.video}else items.push({...p})}save()}
+function load(){try{const saved=JSON.parse(localStorage.getItem('animetv3')||'[]');if(Array.isArray(saved))items=saved.filter(x=>x&&x.type&&!OLD_SEED_IDS.has(x.id)&&x.type!=='embedlist')}catch(e){items=[]}for(const p of POKEMON){const existing=items.find(x=>x.type==='ytlist'&&x.id===p.id);if(existing){existing.title='Pokémon';if(p.video)existing.video=p.video}else items.push({...p})}save()}
 function msg(t){$('osd').textContent=t;$('osd').classList.add('on');clearTimeout(osdTimer);osdTimer=setTimeout(()=>$('osd').classList.remove('on'),6000)}
 function render(){$('list').innerHTML=items.map((x,i)=>'<li class="'+(i===idx?'now':'')+'" data-i="'+i+'"><span>'+(i+1)+'. '+esc(x.title||'Vídeo')+'</span><em>'+esc(x.type==='ytlist'||x.type==='yt'?'YouTube':x.type==='embed'?'incrustado':'vídeo')+'</em><button data-del="'+i+'" title="Quitar">✕</button></li>').join('')}
 function setView(v){$('empty').style.display=v==='empty'?'grid':'none';vid.style.display=v==='video'?'block':'none';ytbox.style.display=v==='youtube'?'block':'none';embedbox.style.display=v==='embed'?'block':'none'}
