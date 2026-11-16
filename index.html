@@ -40,12 +40,13 @@ body.nolock{overflow:hidden}
 <h1>POKÉMON TV</h1>
 <div class="tv"><div class="screen" id="screen"><video id="vid" playsinline></video><div id="ytbox"><div id="ytplayer"></div></div><iframe id="embedbox" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen title="Vídeo incrustado"></iframe><canvas id="noise"></canvas><div class="guard" id="guard"></div><div class="empty" id="empty">Canal Pokémon<br>Listo para sintonizar 📺</div><div class="osd" id="osd"></div><button class="exitfs" id="exitfs">✕ Salir</button><div class="power" id="power"><button id="powerBtn">⏻ Encender POKÉMON TV</button></div></div><div class="tvbadge">POKÉMON TV</div>
 <div class="bar"><button id="play">⏯ Play</button><button id="prev">⏮ Anterior</button><button id="next">⏭ Siguiente</button><button id="off">⏻ Apagar</button><span class="sp"></span><button id="gear" title="Gestionar canal">⚙ Canal</button><button id="mute">🔊</button><input id="vol" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volumen"><button id="full">⛶ Pantalla completa</button><button id="lang">🗣️ ES</button></div></div>
-<div class="cols" id="manage"><section class="card"><h2>Programación</h2><ol id="list"></ol></section><section class="card"><h2>Añadir al canal</h2><input id="title" type="text" placeholder="Título (opcional)"><input id="mins" type="text" placeholder="Duración en minutos para vídeos incrustados"><div class="row"><input id="url" type="text" placeholder="Enlace de YouTube, vídeo o código de inserción"><button id="addUrl">Añadir</button></div><div class="row"><label class="btn filelabel">📁 Añadir archivos propios <input id="files" type="file" accept="video/*" multiple hidden></label><button id="clear">🗑 Vaciar canal</button></div><p class="note">Atajos: ← → episodio, espacio play/pausa, M silencio, F pantalla completa, L idioma de audio, G mostrar u ocultar este panel. Las listas de YouTube se juntan en un único canal y se emiten en orden, empezando en un punto al azar. Otros reproductores (Rumble, Dailymotion, Vimeo…): pega el código &lt;iframe&gt; o el enlace de inserción y la duración en minutos. Los archivos propios solo duran mientras la página está abierta. YouTube no funciona abriendo el archivo con doble clic: aloja la página (Netlify, GitHub Pages) o usa <code>python -m http.server</code>.</p></section></div>
+<div class="cols" id="manage"><section class="card"><h2>Programación</h2><ol id="list"></ol></section><section class="card"><h2>Añadir al canal</h2><input id="title" type="text" placeholder="Título (opcional)"><input id="mins" type="text" placeholder="Duración en minutos para vídeos incrustados"><div class="row"><input id="url" type="text" placeholder="Enlace de YouTube, vídeo o código de inserción"><button id="addUrl">Añadir</button></div><div class="row"><label class="btn filelabel">📁 Añadir archivos propios <input id="files" type="file" accept="video/*" multiple hidden></label><button id="clear">🗑 Vaciar canal</button></div><p class="note">Atajos: ← → episodio, espacio play/pausa, M silencio, F pantalla completa, L idioma de audio, G mostrar u ocultar este panel. Las listas de YouTube se juntan en un único canal y se emiten en orden, empezando en un punto al azar. Otros reproductores (Rumble, Dailymotion, Vimeo…): pega el código &lt;iframe&gt; o el enlace de inserción y la duración en minutos. Los archivos propios solo duran mientras la página está abierta. YouTube no funciona abriendo el archivo con doble clic: aloja la página (Netlify, GitHub Pages) o usa <code>python -m http.server</code>.<br><b>Versión del archivo: 16-nov-2026 · con Pluto TV</b></p></section></div>
 <div style="position:absolute;left:-9999px;top:0;width:200px;height:200px" aria-hidden="true"><div id="ytprobe"></div></div>
 <script>
 'use strict';
 const $=id=>document.getElementById(id);
 const POKEMON=[{type:'ytlist',id:'PLRcHmntfmJ8B5eUO9b-J_fSWF5tPjnSWB',title:'Pokémon'},{type:'ytlist',id:'PLRcHmntfmJ8DU1LS6ExXHGTdzvpHDdVqn',title:'Pokémon'},{type:'ytlist',id:'PLRcHmntfmJ8AOHGOH7140F3UAntAqK6P9',title:'Pokémon'},{type:'ytlist',id:'PLarmIGx21XFw',video:'iPxSEVCvLLE',title:'Pokémon'}];
+const EXTRA=[{type:'embed',src:'https://pluto.tv/es/watch/live-tv/#28812',mins:30,title:'Pluto TV · canal en directo'}];
 const OLD_IDS=new Set(['PLACWFlerZq-8V8x-Ist2boevsprDdOhFA','PLRcHmntfmJ8DB8wgMrUZwf3JGkLM17yeL','PLRcHmntfmJ8A7vV0RYnAu0farLTV_T1i2','PLRcHmntfmJ8BNWmL3MICuc1Oh5Mxf2qEh','PLRcHmntfmJ8AYULKvzhleQPgPRinNDpc0','PLRcHmntfmJ8BWeT4kzalbhx1r43bJv7pI','PLRcHmntfmJ8BdccTC3w86qIBdUjNDfPGV','PLRcHmntfmJ8DzeYoWwk7RsAbl2w-sg0zR','PLJCkfNkMHldU','initial_d_first_stage','PLFWMo_gjXR-P0YdtDG4NlIgEaC9tJaEwl']);
 
 let items=[],idx=0,mode='none',yt=null,ytReady=false,ytLoading=false,ytQueue=[];
@@ -69,6 +70,11 @@ function load(){
     const old=items.find(x=>x.type==='ytlist'&&x.id===p.id);
     if(old){old.title='Pokémon';if(p.video)old.video=p.video}else items.push({...p});
   }
+  let done=[];try{done=JSON.parse(localStorage.getItem('animetv3_extra')||'[]')}catch(e){}
+  for(const x of EXTRA){ // se añade una sola vez; si luego lo quitas, no vuelve
+    if(!done.includes(x.src)){if(!items.some(i=>i.type===x.type&&i.src===x.src))items.push({...x});done.push(x.src)}
+  }
+  try{localStorage.setItem('animetv3_extra',JSON.stringify(done))}catch(e){}
   save();
 }
 
@@ -355,7 +361,7 @@ $('clear').onclick=()=>{
 $('powerBtn').onclick=()=>{
   $('power').style.display='none';
   if(!items.length){$('manage').classList.add('open');setView('empty');return}
-  const sl=slots();idx=sl[Math.floor(Math.random()*sl.length)];fresh=true;playItem(); // punto de partida al azar, solo al encender
+  let sl=slots().filter(i=>items[i].type!=='embed');if(!sl.length)sl=slots();idx=sl[Math.floor(Math.random()*sl.length)];fresh=true;playItem(); // al encender, mejor YouTube que un vídeo incrustado // punto de partida al azar, solo al encender
 };
 $('off').onclick=()=>{
   fresh=false;seekPending=false;stopPlayers();mode='none';setView('empty');
